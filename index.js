@@ -36,6 +36,7 @@ function parseThemes() {
 }
 
 function parseTheme(url_theme, page) {
+  console.log('theme parsing', url_theme, page);
     url_next = url_theme + page;
     request(url_next, (err, res, body) => {
       if (!err) {
@@ -85,14 +86,14 @@ var parseMovie = (url_movie, movie_obj) => {
     //both Async functions executed
     if (!err && results) {
       var movie_to_publish = _.merge(results, movie_obj);
-      snsPublish(movie_to_publish, {arn: config.sns_arn}).then(messageId => {
-        console.log(messageId);
-      });
+      console.log(schemaMovie(movie_to_publish));
+      // snsPublish(movie_to_publish, {arn: config.sns_arn}).then(messageId => {
+      //   // console.log(messageId);
+      // });
     }
     //SQS consumer to upload into ES, simple
   });
 };
-
 var parseMovieDetails = (url_movie, cb) => {
   request(url_movie, function (error, response, body) {
     if (!error && body) {
@@ -144,23 +145,129 @@ var parseMovieReview = (url_movie, cb) => {
   });
 };
 var parseOMDB = (movie_obj, cb) => {
-  var {title, year} = movie_obj;
+  var {title, movie_year} = movie_obj;
   var url_root = 'http://www.omdbapi.com/';
-  var url = url_root + '?t=' + title + '&y='+ year + '&plot=full&r=json';
+  var url = url_root + '?t=' + title + '&y='+ movie_year + '&plot=full&r=json';
 
   request(url, function (error, response, body) {
     if (!error && body) {
       //imdb available, etc.
-      var {Director, Actors} = JSON.parse(body);
-      cb(null, {Director, Actors});
+      var {Director, Actors, Genre, Poster, imdbRating} = JSON.parse(body);
+      cb(null, {
+        directors: (Director) ? Director.split(',') : [],
+        actors: (Actors) ? Actors.split(','): [],
+        picture_url: Poster,
+        rating: imdbRating,
+        genres: (Genre) ? Genre.split(','): []
+      });
     } else {
       console.log("We’ve encountered an error: " + error);
     }
   });
 }
-// parseMovie('http://www.allmovie.com/movie/singin-in-the-rain-v44857', {title: "Singin' in the Rain", year: 1952});
+// parseMovie('http://www.allmovie.com/movie/im-not-ashamed-v658837', {title: "I'm Not Ashamed", movie_year: 2016});
+// parseMovie('http://www.allmovie.com/movie/the-conjuring-2-v585192', {title: "The Conjuring 2", year: 2016});
+
+var schemaMovie = (movie) => {
+  var title = _.get(movie, 'title');
+  title = title.replace(/(\r\n|\n|\r)/gm,"");
+  title = title.trim();
+  var year = _.get(movie, 'movie_year') + '';
+  year = year.replace(/(\r\n|\n|\r)/gm,"");
+  year = year.trim();
+  console.log(title, year);
+  var obj = {
+    // id:
+    title: title,
+    // urls: [ { video: ‘s3 url’, youtube: ‘youtube url’} …  ] //array of url objects. Each obj has s3 video url and youtube url which will have youtube id. For now just one obj stored.
+    actors: _.get(movie, 'omdb.actors'),
+    directors: _.get(movie, 'omdb.directors'),
+    genres: _.get(movie, 'omdb.genres'),
+    picture_url: _.get(movie, 'omdb.picture_url'),
+    release_year: year,
+    key: title.replace(/\s+/g, '').toLowerCase() + '-' + year,//IMPORTANT: title-releaseyear, so we can search for movie based on unique key known from title and year. Lowercase title, remove spaces
+    rating: _.get(movie, 'omdb.rating'),
+    synopsis: _.get(movie, 'details.synopsis'),
+    keywords: _.get(movie, 'details.keywords'),
+    themes: _.get(movie, 'details.themes'),
+    moods: _.get(movie, 'details.moods'),
+    review: _.get(movie, 'review')   
+  }
+  return obj;
+}
 
 var server = app.listen(app.get('port'), () => {
     console.log('App is listening on port ', server.address().port);
 })
-setTimeout(parseThemes, 10);
+
+// setTimeout(parseThemes, 10);
+
+var getMessages = () => {
+  let elasticsearch = require('elasticsearch');
+  const elastic_client = new elasticsearch.Client({
+      hosts: [
+          // {
+          //     protocol: 'https',
+          //     host: config.es.host,
+          //     port: 443
+          // }
+          // ,
+          {
+              host: 'localhost',
+              port: 9200
+          }
+      ]
+  });
+
+  var Consumer = require('sqs-consumer');
+  var consume_movie=Consumer.create({
+    queueUrl: config.sqs_url,
+    batchSize: 10, //not bulk
+    handleMessage: function (message, done) {
+      var movie = JSON.parse(JSON.parse(message['Body'])['Message']);
+      console.log(movie.title, movie.movie_year);
+      movie_to_index = schemaMovie(movie);
+      // console.log(movie_to_index);
+      var is_complete =  _.get(movie, 'details.moods') && _.get(movie, 'details.themes') && _.get(movie, 'omdb.genres') && _.get(movie, 'details.keywords')
+      elastic_client.index({
+          index: (is_complete.length > 0) ? config.es.index_complete : config.es.index_incomplete,
+          type: config.es.doc_type,
+          body: movie_to_index
+      }).then(function (result) {
+          console.log(result.created);
+          // done();
+      }).catch(console.log);
+    }
+  });
+  consume_movie.on('error', function (err) {
+    console.log(err.message);
+  });
+  consume_movie.start();  
+}
+// getMessages();
+
+var upload2ESBulk = (movies) => {
+  let bulk_movies = [];
+  movies.forEach((m) => {
+      if (true) {
+          console.log(m);
+          bulk_movies.push(
+              { index: {_index: config.es.index, _type: config.es.doc_type} },
+              m
+          );
+      }
+  });  
+  elastic_client.bulk({
+      maxRetries: 5,
+      index: config.es.index,
+      type: config.es.doc_type,
+      body: bulk_movies
+  }, function(err,resp,status) {
+      if (err) {
+          console.log(err);
+      }
+      else {
+          console.log('this many docs added - ',resp.items.length);  
+      }
+  });
+}
