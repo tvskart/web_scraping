@@ -7,6 +7,10 @@ var request = require("request"),
   url_root = 'http://www.allmovie.com';
 
 var async = require('async');
+var express  = require('express');
+var app = express();
+var port = 8080;
+app.set('port', process.env.PORT || port);
 
 aws.config.update(config.aws);
 var snsPublish = require('aws-sns-publish');
@@ -30,7 +34,6 @@ function parseThemes() {
     }
   });
 }
-parseThemes();
 
 function parseTheme(url_theme, page) {
     url_next = url_theme + page;
@@ -156,3 +159,8 @@ var parseOMDB = (movie_obj, cb) => {
   });
 }
 // parseMovie('http://www.allmovie.com/movie/singin-in-the-rain-v44857', {title: "Singin' in the Rain", year: 1952});
+
+var server = app.listen(app.get('port'), () => {
+    console.log('App is listening on port ', server.address().port);
+})
+setTimeout(parseThemes, 10);
