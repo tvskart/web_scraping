@@ -6,6 +6,8 @@ var request = require("request"),
   url_themes = "http://www.allmovie.com/themes",
   url_root = 'http://www.allmovie.com';
 
+var async = require('async');
+
 aws.config.update(config.aws);
 var snsPublish = require('aws-sns-publish');
 
@@ -19,7 +21,7 @@ function parseThemes() {
         theme = $(this).text();
         href = $(this).attr('href');
         url_theme = url_root + href + '/releaseyear-desc/';
-        console.log("theme found - ", theme, url_theme);
+        // console.log("theme found - ", theme, url_theme);
         //TODO: save all the themes somewhere
         parseTheme(url_theme, 1);
       });
@@ -44,9 +46,7 @@ function parseTheme(url_theme, page) {
               movie_year = $(this).find('p.movie-year').text();
               
               url_movie = url_root + href;
-              // console.log("movie found - ", title, url_movie);
-              //TODO: save mapping of theme and movie-year?
-              parseMovie(url_movie);
+              parseMovie(url_movie, {title, movie_year});
             });
             //next page of theme
             page+=1;
@@ -60,8 +60,33 @@ function parseTheme(url_theme, page) {
         }        
     });
 }
+// parseTheme('http://www.allmovie.com/characteristic/theme/ghosts-d1664/releaseyear-desc/', 1);
 
-parseMovie = (url_movie, movie_obj) => {
+var parseMovie = (url_movie, movie_obj) => {
+  async.parallel({
+    review: (cb) => {
+      return parseMovieReview(url_movie, cb)
+    },
+    details: (cb) => {
+      return parseMovieDetails(url_movie, cb)
+    },
+    omdb: (cb) => {
+      return parseOMDB(movie_obj, cb)
+    }
+    // dummy: (cb) => {
+    //   request('https://www.google.com/', (e, r, b) => {
+    //     cb(null, 'google home page');
+    //   });
+    // }
+  }, (err, results) => {
+    //both Async functions executed
+    console.log(results);
+    //TODO: store in queue the details
+    //SQS consumer to upload into ES, simple
+  });
+};
+
+var parseMovieDetails = (url_movie, cb) => {
   request(url_movie, function (error, response, body) {
     if (!error && body) {
       var $ = cheerio.load(body),
@@ -69,8 +94,8 @@ parseMovie = (url_movie, movie_obj) => {
 
       var moods = [],
         themes = [],
-        keywords = []
-      ;
+        keywords = [];
+
       characteristics.find('.moods .charactList a').each((i, el) => {
         moods[i] = $(el).text();
       });
@@ -81,16 +106,49 @@ parseMovie = (url_movie, movie_obj) => {
         keywords[i] = $(el).text();
       });
       var synopsis = $('section.synopsis').find('.text').text();
-      console.log('Movie ', url_movie, moods, themes, keywords, synopsis);
-      console.log(_.merge(movie_obj, {moods, themes, keywords, synopsis}));
-      //TODO: get details from review, etc...
-      //TODO: store mapping of movie to moods, themes, keywords via elastic search etc.
-      // snsPublish(tweet, {arn: 'arn:aws:sns:us-west-2:012274775406:Processed_tweet'}).then(messageId => {
-      //   console.log(messageId);
-      // });
+      // console.log('Movie ', url_movie, moods, themes, keywords, synopsis);
+      // console.log(_.merge(movie_obj, {moods, themes, keywords, synopsis}));
+      cb(null, {moods, themes, keywords, synopsis});
     } else {
       console.log("We’ve encountered an error: " + error);
     }
   });
 };
-parseMovie('http://www.allmovie.com/movie/singin-in-the-rain-v44857');
+var parseMovieReview = (url_movie, cb) => {
+  var url_movie_review = url_movie + '/review';
+  request(url_movie_review, function (error, response, body) {
+    if (!error && body) {
+      var $ = cheerio.load(body),
+        review_container = $("section.review div.text");
+      
+      review_texts = review_container.find('p').map(function(i, elem) {
+        var p = $(elem).text();
+        return p;
+      });
+      var review = '';
+      review_texts.each((i, elem) => {
+        review += elem;
+      });
+
+      cb(null, review);
+    } else {
+      console.log("We’ve encountered an error: " + error);
+    }
+  });
+};
+var parseOMDB = (movie_obj, cb) => {
+  var {title, year} = movie_obj;
+  var url_root = 'http://www.omdbapi.com/';
+  var url = url_root + '?t=' + title + '&y='+ year + '&plot=full&r=json';
+
+  request(url, function (error, response, body) {
+    if (!error && body) {
+      //imdb available, etc.
+      var {Director, Actors} = JSON.parse(body);
+      cb(null, {Director, Actors});
+    } else {
+      console.log("We’ve encountered an error: " + error);
+    }
+  });
+}
+parseMovie('http://www.allmovie.com/movie/singin-in-the-rain-v44857', {title: "Singin' in the Rain", year: 1952});
