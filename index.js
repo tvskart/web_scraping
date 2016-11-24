@@ -30,7 +30,7 @@ function parseThemes() {
     }
   });
 }
-// parseThemes();
+parseThemes();
 
 function parseTheme(url_theme, page) {
     url_next = url_theme + page;
@@ -80,8 +80,12 @@ var parseMovie = (url_movie, movie_obj) => {
     // }
   }, (err, results) => {
     //both Async functions executed
-    console.log(results);
-    //TODO: store in queue the details
+    if (!err && results) {
+      var movie_to_publish = _.merge(results, movie_obj);
+      snsPublish(movie_to_publish, {arn: config.sns_arn}).then(messageId => {
+        console.log(messageId);
+      });
+    }
     //SQS consumer to upload into ES, simple
   });
 };
@@ -151,4 +155,4 @@ var parseOMDB = (movie_obj, cb) => {
     }
   });
 }
-parseMovie('http://www.allmovie.com/movie/singin-in-the-rain-v44857', {title: "Singin' in the Rain", year: 1952});
+// parseMovie('http://www.allmovie.com/movie/singin-in-the-rain-v44857', {title: "Singin' in the Rain", year: 1952});
