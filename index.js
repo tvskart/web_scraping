@@ -8,9 +8,12 @@ var request = require("request"),
 
 var async = require('async');
 var express  = require('express');
+var bodyParser = require('body-parser');
+
 var app = express();
 var port = 8080;
 app.set('port', process.env.PORT || port);
+app.use(bodyParser.urlencoded({extended: false})); //just trying to see if it fixes anything..
 
 aws.config.update(config.aws);
 var snsPublish = require('aws-sns-publish');
@@ -140,7 +143,7 @@ var parseOMDB = (movie_obj, cb) => {
     }
   });
 }
-var parseMovie = (url_movie, movie_obj) => {
+var parseMovie = (url_movie, movie_obj, final_cb) => {
   async.parallel({
     review: (cb) => {
       return parseMovieReview(url_movie, cb)
@@ -163,13 +166,14 @@ var parseMovie = (url_movie, movie_obj) => {
       console.log(schemaMovie(movie_to_publish));
       snsPublish(movie_to_publish, {arn: config.sns_arn}).then(messageId => {
         console.log(messageId);
+        if (final_cb) final_cb(movie_to_publish);
       });
     }
   });
 };
 // parseMovie('http://www.allmovie.com/movie/im-not-ashamed-v658837', {title: "I'm Not Ashamed", movie_year: 2016});
 // parseMovie('http://www.allmovie.com/movie/the-conjuring-2-v585192', {title: "The Conjuring 2", movie_year: 2016});
-//parseMovie('http://www.allmovie.com/movie/avengers-age-of-ultron-v570172', {title: "Avengers: Age of Ultron", movie_year: 2015});
+// parseMovie('http://www.allmovie.com/movie/avengers-age-of-ultron-v570172', {title: "Avengers: Age of Ultron", movie_year: 2015});
 
 var schemaMovie = (movie) => {
   var title = _.get(movie, 'title');
@@ -199,9 +203,13 @@ var schemaMovie = (movie) => {
   return obj;
 }
 
-app.get('/start', (req, res) => {
-    var movie = parseMovie('http://www.allmovie.com/movie/avengers-age-of-ultron-v570172', {title: "Avengers: Age of Ultron", movie_year: 2015});
-    res.json(movie);
+app.get('/search', (req, res) => {
+    var movie_url = req.query.movie_url || 'http://www.allmovie.com/movie/avengers-age-of-ultron-v570172';
+    var title = req.query.title || 'Avengers: Age of Ultron';
+    var movie_year = req.query.movie_year || '';
+    parseMovie(movie_url, {title, movie_year}, (movie) => {
+      res.json(movie);
+    });
 });
 
 var server = app.listen(app.get('port'), () => {
@@ -211,7 +219,7 @@ var server = app.listen(app.get('port'), () => {
 // setTimeout(parseThemes, 10);
 
 var getMessages = () => {
-  let elasticsearch = require('elasticsearch');
+  var elasticsearch = require('elasticsearch');
   const elastic_client = new elasticsearch.Client({
       hosts: [
           {
@@ -261,7 +269,7 @@ var getMessages = () => {
 // getMessages();
 
 var upload2ESBulk = (movies) => {
-  let bulk_movies = [];
+  var bulk_movies = [];
   movies.forEach((m) => {
       if (true) {
           console.log(m);
