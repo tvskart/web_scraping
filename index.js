@@ -46,8 +46,12 @@ function parseTheme(url_theme, page) {
           if (movies.length > 0) {
             movies.each(function(i, elem) {
               title = $(this).find('p.title').text();
+              title = title.replace(/(\r\n|\n|\r)/gm,"");
+              title = title.trim();
               href= $(this).find('p.title a').attr('href');
               movie_year = $(this).find('p.movie-year').text();
+              movie_year = movie_year.replace(/(\r\n|\n|\r)/gm,"");
+              movie_year = movie_year.trim();
               
               url_movie = url_root + href;
               parseMovie(url_movie, {title, movie_year});
@@ -66,34 +70,6 @@ function parseTheme(url_theme, page) {
 }
 // parseTheme('http://www.allmovie.com/characteristic/theme/ghosts-d1664/releaseyear-desc/', 1);
 
-var parseMovie = (url_movie, movie_obj) => {
-  async.parallel({
-    review: (cb) => {
-      return parseMovieReview(url_movie, cb)
-    },
-    details: (cb) => {
-      return parseMovieDetails(url_movie, cb)
-    },
-    omdb: (cb) => {
-      return parseOMDB(movie_obj, cb)
-    }
-    // dummy: (cb) => {
-    //   request('https://www.google.com/', (e, r, b) => {
-    //     cb(null, 'google home page');
-    //   });
-    // }
-  }, (err, results) => {
-    //both Async functions executed
-    if (!err && results) {
-      var movie_to_publish = _.merge(results, movie_obj);
-      console.log(schemaMovie(movie_to_publish));
-      // snsPublish(movie_to_publish, {arn: config.sns_arn}).then(messageId => {
-      //   // console.log(messageId);
-      // });
-    }
-    //SQS consumer to upload into ES, simple
-  });
-};
 var parseMovieDetails = (url_movie, cb) => {
   request(url_movie, function (error, response, body) {
     if (!error && body) {
@@ -110,12 +86,11 @@ var parseMovieDetails = (url_movie, cb) => {
       characteristics.find('.themes .charactList a').each((i, el) => {
         themes[i] = $(el).text();
       });
-      characteristics.find('.keywords .charactList a').map((i, el) => {
-        keywords[i] = $(el).text();
+      keywords = characteristics.find('.keywords .charactList').text().split(',').map((k) => {
+          return k.replace(/(\r\n|\n|\r)/gm,"").trim();
       });
       var synopsis = $('section.synopsis').find('.text').text();
-      // console.log('Movie ', url_movie, moods, themes, keywords, synopsis);
-      // console.log(_.merge(movie_obj, {moods, themes, keywords, synopsis}));
+
       cb(null, {moods, themes, keywords, synopsis});
     } else {
       console.log("We’ve encountered an error: " + error);
@@ -165,8 +140,37 @@ var parseOMDB = (movie_obj, cb) => {
     }
   });
 }
+var parseMovie = (url_movie, movie_obj) => {
+  async.parallel({
+    review: (cb) => {
+      return parseMovieReview(url_movie, cb)
+    },
+    details: (cb) => {
+      return parseMovieDetails(url_movie, cb)
+    },
+    omdb: (cb) => {
+      return parseOMDB(movie_obj, cb)
+    }
+    // dummy: (cb) => {
+    //   request('https://www.google.com/', (e, r, b) => {
+    //     cb(null, 'google home page');
+    //   });
+    // }
+  }, (err, results) => {
+    //both Async functions executed
+    if (!err && results) {
+      var movie_to_publish = _.merge(results, movie_obj);
+      console.log(schemaMovie(movie_to_publish));
+      // snsPublish(movie_to_publish, {arn: config.sns_arn}).then(messageId => {
+      //   // console.log(messageId);
+      // });
+    }
+    //SQS consumer to upload into ES, simple
+  });
+};
 // parseMovie('http://www.allmovie.com/movie/im-not-ashamed-v658837', {title: "I'm Not Ashamed", movie_year: 2016});
-// parseMovie('http://www.allmovie.com/movie/the-conjuring-2-v585192', {title: "The Conjuring 2", year: 2016});
+// parseMovie('http://www.allmovie.com/movie/the-conjuring-2-v585192', {title: "The Conjuring 2", movie_year: 2016});
+// parseMovie('http://www.allmovie.com/movie/avengers-age-of-ultron-v570172', {title: "Avengers: Age of Ultron", movie_year: 2015});
 
 var schemaMovie = (movie) => {
   var title = _.get(movie, 'title');
@@ -206,23 +210,29 @@ var getMessages = () => {
   let elasticsearch = require('elasticsearch');
   const elastic_client = new elasticsearch.Client({
       hosts: [
-          // {
-          //     protocol: 'https',
-          //     host: config.es.host,
-          //     port: 443
-          // }
-          // ,
           {
-              host: 'localhost',
-              port: 9200
+              protocol: 'https',
+              host: config.es.host,
+              port: 443
           }
+          // ,
+          // {
+          //     host: 'localhost',
+          //     port: 9200
+          // }
       ]
   });
-
+  // elastic_client.indices.create({
+  //     index: config.es.index_complete
+  // },(err, resp, status) => {
+  //     if (err) {
+  //         console.log(err);
+  //     }
+  // });
   var Consumer = require('sqs-consumer');
   var consume_movie=Consumer.create({
     queueUrl: config.sqs_url,
-    batchSize: 10, //not bulk
+    batchSize: 5, //not bulk
     handleMessage: function (message, done) {
       var movie = JSON.parse(JSON.parse(message['Body'])['Message']);
       console.log(movie.title, movie.movie_year);
@@ -235,7 +245,7 @@ var getMessages = () => {
           body: movie_to_index
       }).then(function (result) {
           console.log(result.created);
-          // done();
+          done();
       }).catch(console.log);
     }
   });
