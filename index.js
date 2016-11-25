@@ -57,6 +57,7 @@ function parseTheme(url_theme, page) {
               movie_year = movie_year.trim();
               
               url_movie = url_root + href;
+              //todo: maybe simplify no need of title and year passing...
               parseMovie(url_movie, {title, movie_year});
             });
             //next page of theme
@@ -92,9 +93,18 @@ var parseMovieDetails = (url_movie, cb) => {
       keywords = characteristics.find('.keywords .charactList').text().split(',').map((k) => {
           return k.replace(/(\r\n|\n|\r)/gm,"").trim();
       });
-      var synopsis = $('section.synopsis').find('.text').text();
-      synopsis = synopsis.replace(/(\r\n|\n|\r)/gm,"").trim();
-      cb(null, {moods, themes, keywords, synopsis});
+      var synopsis = $('section.synopsis').find('.text').text().trim();
+      synopsis = synopsis.replace(/(\r\n|\n|\r)/gm,"");
+      synopsis = synopsis.trim();
+
+      var movie_year = $('h2.movie-title span').text();
+      movie_year = movie_year.replace('(','');
+      movie_year = movie_year.replace(')','');
+
+      var title = $('h2.movie-title').text().trim();
+      title = title.replace(movie_year, '');
+      title.replace(/(\r\n|\n|\r)/gm,"");
+      cb(null, {moods, themes, keywords, synopsis, title, movie_year});
     } else {
       console.log("We’ve encountered an error: " + error);
     }
