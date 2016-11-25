@@ -110,6 +110,7 @@ var parseMovieDetails = (url_movie, cb) => {
     }
   });
 };
+
 var parseMovieReview = (url_movie, cb) => {
   var url_movie_review = url_movie + '/review';
   request(url_movie_review, function (error, response, body) {
@@ -140,14 +141,21 @@ var parseOMDB = (movie_obj, cb) => {
   request(url, function (error, response, body) {
     if (!error && body) {
       //imdb available, etc.
-      var {Director, Actors, Genre, Poster, imdbRating} = JSON.parse(body);
-      cb(null, {
-        directors: (Director) ? Director.split(',') : [],
-        actors: (Actors) ? Actors.split(','): [],
-        picture_url: Poster,
-        rating: imdbRating,
-        genres: (Genre) ? Genre.split(','): []
-      });
+      try {
+          var {Director, Actors, Genre, Poster, imdbRating} = JSON.parse(body);
+          Director = Director.replace(/"/g, ""); //remove quotes
+          Actors = Actors.replace(/"/g, ""); //remove quotes
+          cb(null, {
+            directors: (Director) ? Director.split(',') : [],
+            actors: (Actors) ? Actors.split(','): [],
+            picture_url: Poster,
+            rating: imdbRating,
+            genres: (Genre) ? Genre.split(','): []
+          });
+      } catch(err) {
+        console.log("We’ve encountered an error: " + error); //couldnt parse, body not proper json
+      }
+
     } else {
       console.log("We’ve encountered an error: " + error);
     }
@@ -173,7 +181,7 @@ var parseMovie = (url_movie, movie_obj, final_cb) => {
     //both Async functions executed
     if (!err && results) {
       var movie_to_publish = _.merge(results, movie_obj);
-      console.log(schemaMovie(movie_to_publish));
+      console.log(movie_to_publish.title, movie_to_publish.movie_year);
       snsPublish(movie_to_publish, {arn: config.sns_arn}).then(messageId => {
         console.log(messageId);
         if (final_cb) final_cb(movie_to_publish);
@@ -181,7 +189,7 @@ var parseMovie = (url_movie, movie_obj, final_cb) => {
     }
   });
 };
-// parseMovie('http://www.allmovie.com/movie/im-not-ashamed-v658837', {title: "I'm Not Ashamed", movie_year: 2016});
+// parseMovie('http://www.allmovie.com/movie/im-not-ashamed-v658837', {title: "Subconscious Whispers", movie_year: 2014});
 // parseMovie('http://www.allmovie.com/movie/the-conjuring-2-v585192', {title: "The Conjuring 2", movie_year: 2016});
 // parseMovie('http://www.allmovie.com/movie/avengers-age-of-ultron-v570172', {title: "Avengers: Age of Ultron", movie_year: 2015});
 
