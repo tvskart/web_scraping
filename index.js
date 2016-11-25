@@ -90,7 +90,7 @@ var parseMovieDetails = (url_movie, cb) => {
           return k.replace(/(\r\n|\n|\r)/gm,"").trim();
       });
       var synopsis = $('section.synopsis').find('.text').text();
-
+      synopsis = synopsis.replace(/(\r\n|\n|\r)/gm,"").trim();
       cb(null, {moods, themes, keywords, synopsis});
     } else {
       console.log("We’ve encountered an error: " + error);
@@ -161,16 +161,15 @@ var parseMovie = (url_movie, movie_obj) => {
     if (!err && results) {
       var movie_to_publish = _.merge(results, movie_obj);
       console.log(schemaMovie(movie_to_publish));
-      // snsPublish(movie_to_publish, {arn: config.sns_arn}).then(messageId => {
-      //   // console.log(messageId);
-      // });
+      snsPublish(movie_to_publish, {arn: config.sns_arn}).then(messageId => {
+        console.log(messageId);
+      });
     }
-    //SQS consumer to upload into ES, simple
   });
 };
 // parseMovie('http://www.allmovie.com/movie/im-not-ashamed-v658837', {title: "I'm Not Ashamed", movie_year: 2016});
 // parseMovie('http://www.allmovie.com/movie/the-conjuring-2-v585192', {title: "The Conjuring 2", movie_year: 2016});
-// parseMovie('http://www.allmovie.com/movie/avengers-age-of-ultron-v570172', {title: "Avengers: Age of Ultron", movie_year: 2015});
+//parseMovie('http://www.allmovie.com/movie/avengers-age-of-ultron-v570172', {title: "Avengers: Age of Ultron", movie_year: 2015});
 
 var schemaMovie = (movie) => {
   var title = _.get(movie, 'title');
@@ -199,6 +198,11 @@ var schemaMovie = (movie) => {
   }
   return obj;
 }
+
+app.get('/start', (req, res) => {
+    var movie = parseMovie('http://www.allmovie.com/movie/avengers-age-of-ultron-v570172', {title: "Avengers: Age of Ultron", movie_year: 2015});
+    res.json(movie);
+});
 
 var server = app.listen(app.get('port'), () => {
     console.log('App is listening on port ', server.address().port);
