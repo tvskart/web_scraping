@@ -68,7 +68,7 @@ function parseTheme(url_theme, page) {
             console.log('End of theme!!', url_theme);
           }
         } else {
-          console.log("We’ve encountered an error: " + error);
+          console.log("We’ve encountered an error: " + err);
         }        
     });
 }
@@ -90,9 +90,13 @@ var parseMovieDetails = (url_movie, cb) => {
       characteristics.find('.themes .charactList a').each((i, el) => {
         themes[i] = $(el).text();
       });
-      keywords = characteristics.find('.keywords .charactList').text().split(',').map((k) => {
-          return k.replace(/(\r\n|\n|\r)/gm,"").trim();
-      });
+      //resolve empty string in keywords
+      if (characteristics.find('.keywords .charactList').text().trim()) {
+          keywords = characteristics.find('.keywords .charactList').text().split(',').map((k) => {
+              return k.replace(/(\r\n|\n|\r)/gm,"").trim();
+          });
+      }
+
       var synopsis = $('section.synopsis').find('.text').text().trim();
       synopsis = synopsis.replace(/(\r\n|\n|\r)/gm,"");
       synopsis = synopsis.trim();
@@ -143,17 +147,16 @@ var parseOMDB = (movie_obj, cb) => {
       //imdb available, etc.
       try {
           var {Director, Actors, Genre, Poster, imdbRating} = JSON.parse(body);
-          Director = Director.replace(/"/g, ""); //remove quotes
-          Actors = Actors.replace(/"/g, ""); //remove quotes
+          // resolve spaces in key values
           cb(null, {
-            directors: (Director) ? Director.split(',') : [],
-            actors: (Actors) ? Actors.split(','): [],
+            directors: (Director) ? Director.split(',').map((s) => {return s.trim();}) : [],
+            actors: (Actors) ? Actors.split(',').map((s) => {return s.trim();}) : [],
             picture_url: Poster,
             rating: imdbRating,
-            genres: (Genre) ? Genre.split(','): []
+            genres: (Genre) ? Genre.split(',').map((s) => {return s.trim();}) : []
           });
       } catch(err) {
-        console.log("We’ve encountered an error: " + error); //couldnt parse, body not proper json
+        console.log("We’ve encountered parsing omdb error?: " + err); //couldnt parse, body not proper json
       }
 
     } else {
@@ -181,7 +184,8 @@ var parseMovie = (url_movie, movie_obj, final_cb) => {
     //both Async functions executed
     if (!err && results) {
       var movie_to_publish = _.merge(results, movie_obj);
-      console.log(movie_to_publish.title, movie_to_publish.movie_year);
+      // console.log(schemaMovie(movie_to_publish));
+      // console.log(movie_to_publish.title, movie_to_publish.movie_year);
       snsPublish(movie_to_publish, {arn: config.sns_arn}).then(messageId => {
         console.log(messageId);
         if (final_cb) final_cb(movie_to_publish);
@@ -189,7 +193,7 @@ var parseMovie = (url_movie, movie_obj, final_cb) => {
     }
   });
 };
-// parseMovie('http://www.allmovie.com/movie/im-not-ashamed-v658837', {title: "Subconscious Whispers", movie_year: 2014});
+// parseMovie('http://www.allmovie.com/movie/open-city-v430223', {title: "Open City", movie_year: 2008});
 // parseMovie('http://www.allmovie.com/movie/the-conjuring-2-v585192', {title: "The Conjuring 2", movie_year: 2016});
 // parseMovie('http://www.allmovie.com/movie/avengers-age-of-ultron-v570172', {title: "Avengers: Age of Ultron", movie_year: 2015});
 
@@ -218,6 +222,13 @@ var schemaMovie = (movie) => {
     moods: _.get(movie, 'details.moods'),
     review: _.get(movie, 'review')   
   }
+
+  //unfortunate changes need to be done here
+  if (_.get(obj, 'keywords')[0] == "") obj.keywords = [];
+  if (_.get(obj, 'actors')) obj.actors = _.get(obj, 'actors').map((s) => {return s.trim();});
+  if (_.get(obj, 'directors')) obj.directors = _.get(obj, 'directors').map((s) => {return s.trim();});
+  if (_.get(obj, 'genres')) obj.genres = _.get(obj, 'genres').map((s) => {return s.trim();});  
+  
   return obj;
 }
 
@@ -252,6 +263,7 @@ var getMessages = () => {
           // }
       ]
   });
+
   // elastic_client.indices.create({
   //     index: config.es.index_complete
   // },(err, resp, status) => {
@@ -259,18 +271,19 @@ var getMessages = () => {
   //         console.log(err);
   //     }
   // });
+
   var Consumer = require('sqs-consumer');
   var consume_movie=Consumer.create({
     queueUrl: config.sqs_url,
-    batchSize: 5, //not bulk
+    batchSize: 10, //not bulk
     handleMessage: function (message, done) {
       var movie = JSON.parse(JSON.parse(message['Body'])['Message']);
       console.log(movie.title, movie.movie_year);
       movie_to_index = schemaMovie(movie);
       // console.log(movie_to_index);
-      var is_complete =  _.get(movie, 'details.moods') && _.get(movie, 'details.themes') && _.get(movie, 'omdb.genres') && _.get(movie, 'details.keywords')
+      var is_complete =  _.get(movie_to_index, 'moods').length && _.get(movie_to_index, 'themes').length && _.get(movie_to_index, 'genres').length && _.get(movie_to_index, 'keywords').length;
       elastic_client.index({
-          index: (is_complete.length > 0) ? config.es.index_complete : config.es.index_incomplete,
+          index: (is_complete > 0) ? config.es.index_complete : config.es.index_incomplete,
           type: config.es.doc_type,
           body: movie_to_index
       }).then(function (result) {
@@ -296,7 +309,7 @@ var upload2ESBulk = (movies) => {
               m
           );
       }
-  });  
+  });
   elastic_client.bulk({
       maxRetries: 5,
       index: config.es.index,
