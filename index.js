@@ -232,12 +232,61 @@ var schemaMovie = (movie) => {
   return obj;
 }
 
-app.get('/search', (req, res) => {
+//Upload movie to SNS, processing
+app.get('/upload', (req, res) => {
     var movie_url = req.query.movie_url || 'http://www.allmovie.com/movie/avengers-age-of-ultron-v570172';
     var title = req.query.title || 'Avengers: Age of Ultron';
     var movie_year = req.query.movie_year || '';
     parseMovie(movie_url, {title, movie_year}, (movie) => {
       res.json(movie);
+    });
+});
+
+//http://localhost:8080/search?title=Independence%20Day
+app.get('/search', (req, res) => {
+    var title = req.query.title || 'Avengers: Age of Ultron';
+    var movie_year = req.query.movie_year || '';
+    console.log(title, movie_year);
+    // Run a search, return to client side
+    var search_query = '';
+    if (title !== '') { //default
+        search_query += "title:'" + title + "'";
+        // search_query += (movie_year) ? "&release_year:'" + movie_year + "'" : "";
+    }
+    console.log('search query', search_query);
+    var elasticsearch = require('elasticsearch');
+    const elastic_client = new elasticsearch.Client({
+          hosts: [
+              {
+                  protocol: 'https',
+                  host: config.es.host,
+                  port: 443
+              }
+              // ,
+              // {
+              //     host: 'localhost',
+              //     port: 9200
+              // }
+          ]
+    });
+    elastic_client.search({
+        index: '_all', //search all indices
+        type: config.es.doc_type,
+        q: search_query
+    },function (error, response,status) {
+        if (error){
+            console.log("search error: "+error);
+        }
+        else {
+            let movies = [];
+            console.log("--- Response ---");
+            console.log(response);
+            console.log("--- Hits ---");
+            response.hits.hits.forEach(function(hit){
+                movies.push(hit._source);
+            });
+            res.json(movies);
+        }
     });
 });
 
